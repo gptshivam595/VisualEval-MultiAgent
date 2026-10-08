@@ -7,6 +7,7 @@ import { MODEL_SLOTS } from '../../server/types.js';
 import type { PersonaResult } from '../../server/types.js';
 import { validatePersonaResponse } from '../../server/validation.js';
 import { aggregateResults } from '../../server/aggregate.js';
+import { GroqRequestError } from '../../server/provider.js';
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 24 * 1024 * 1024;
@@ -14,6 +15,21 @@ const ALLOWED_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 function json(statusCode: number, body: unknown) {
   return { statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(body) };
+}
+
+function safePersonaError(error: unknown): string {
+  if (error instanceof GroqRequestError) {
+    if (error.status === 404) return 'provider_model_unavailable';
+    if (error.status === 401 || error.status === 403) return 'provider_authentication_failed';
+    if (error.status === 429) return 'provider_rate_limited';
+    if (error.status !== null && error.status >= 500) return 'provider_temporarily_unavailable';
+    if (error.status === null) return 'provider_network_error';
+    return 'provider_request_failed';
+  }
+  if (error instanceof Error && error.message === 'Invalid JSON') return 'malformed_provider_json';
+  if (error instanceof Error && error.message.includes('Persona response')) return 'invalid_persona_response';
+  if (error instanceof Error && error.message.includes('GROQ_API_KEY')) return 'server_provider_configuration_missing';
+  return 'evaluation_failed';
 }
 
 function decodeBody(event: Parameters<Handler>[0]): Buffer {
@@ -51,13 +67,17 @@ export const handler: Handler = async (event) => {
           try {
             const raw = await groqProvider.evaluatePersona({ images, rubric: rubricText }, persona);
             parsed = validatePersonaResponse(raw.content, persona.personaId);
-          } catch {
+          } catch (error) {
+            if (error instanceof Error && error.message.includes('GROQ_API_KEY')) throw error;
+            if (error instanceof GroqRequestError && !error.retryable) throw error;
             const raw = await groqProvider.evaluatePersona({ images, rubric: rubricText }, persona);
             parsed = validatePersonaResponse(raw.content, persona.personaId);
           }
           results.push({ persona_id: persona.personaId, persona_name: persona.name, status: 'valid', evaluations: parsed, error_code: null });
         } catch (error) {
-          results.push({ persona_id: persona.personaId, persona_name: persona.name, status: 'failed', evaluations: [], error_code: error instanceof Error ? error.message.slice(0, 120) : 'evaluation_failed' });
+          const errorCode = safePersonaError(error);
+          console.error('[evaluation] persona failed', { personaId: persona.personaId, errorCode });
+          results.push({ persona_id: persona.personaId, persona_name: persona.name, status: 'failed', evaluations: [], error_code: errorCode });
         }
       }
     };

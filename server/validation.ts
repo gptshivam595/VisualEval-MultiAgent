@@ -36,7 +36,7 @@ function parseJson(content: string): unknown {
 
 export function validatePersonaResponse(content: string, personaId: string): PersonaImageEvaluation[] {
   const parsed = parseJson(content);
-  const candidate = Array.isArray(parsed) ? parsed : (parsed as { evaluations?: unknown }).evaluations;
+  const candidate = (parsed as { evaluations?: unknown }).evaluations;
   if (!Array.isArray(candidate) || candidate.length !== 3) throw new Error('Persona response must contain exactly three evaluations');
 
   const results = candidate.map((item) => providerSchema.parse(item)) as PersonaImageEvaluation[];
