@@ -2,7 +2,7 @@ import type { Persona } from './types.js';
 import { getGroqModel, GROQ_API_ENDPOINT } from './groq-config.js';
 
 export interface ProviderContext {
-  images: Array<{ imageId: string; modelName: string; mimeType: string; dataUrl: string }>;
+  image: { imageId: string; modelName: string; mimeType: string; dataUrl: string };
   rubric: string;
 }
 
@@ -11,7 +11,7 @@ export interface RawPersonaResponse {
 }
 
 export interface LlmProvider {
-  evaluatePersona(context: ProviderContext, persona: Persona): Promise<RawPersonaResponse>;
+  evaluatePersonaImage(context: ProviderContext, persona: Persona): Promise<RawPersonaResponse>;
 }
 
 export class GroqRequestError extends Error {
@@ -20,6 +20,7 @@ export class GroqRequestError extends Error {
     public readonly status: number | null,
     public readonly providerCode: string | null,
     public readonly retryable: boolean,
+    public readonly retryAfterMs: number | null = null,
   ) {
     super(message);
     this.name = 'GroqRequestError';
@@ -33,13 +34,13 @@ function getEnv(name: string): string {
 }
 
 export const groqProvider: LlmProvider = {
-  async evaluatePersona(context, persona) {
+  async evaluatePersonaImage(context, persona) {
     const apiKey = getEnv('GROQ_API_KEY');
     const model = getGroqModel();
-    const imageContent = context.images.flatMap((image) => [
-      { type: 'text', text: `${image.imageId} is permanently associated with ${image.modelName}. Evaluate the image independently; do not compare it to other images.` },
-      { type: 'image_url', image_url: { url: image.dataUrl } },
-    ]);
+    const imageContent = [
+      { type: 'text', text: `${context.image.imageId} is permanently associated with ${context.image.modelName}. Evaluate only this image. Do not compare it to any other image.` },
+      { type: 'image_url', image_url: { url: context.image.dataUrl } },
+    ];
 
     const system = [
       'You are one simulated Indian fashion-evaluation persona in a pre-evaluation study.',
@@ -48,7 +49,7 @@ export const groqProvider: LlmProvider = {
       'Return only valid JSON with no markdown, no code fences, and no commentary outside JSON.',
       'Use exactly the supplied criterion IDs and score each from 0 to 10.',
       'Provide concise evidence for every criterion, strengths, concerns, India-specific observations, and confidence from 0 to 1.',
-      'Return a JSON object with an evaluations array containing exactly three objects, one for image1, image2, and image3. Every object must contain exactly these fields: persona_id, persona_name, image_id, model_name, criterion_scores, criterion_reasoning, weighted_score, strengths, concerns, india_specific_observations, confidence.',
+      'Return a JSON object with one evaluation object. Every object must contain exactly these fields: persona_id, persona_name, image_id, model_name, criterion_scores, criterion_reasoning, weighted_score, strengths, concerns, india_specific_observations, confidence.',
       'criterion_scores and criterion_reasoning must contain every supplied criterion ID. weighted_score must be the weighted 0-10 calculation from criterion_scores.',
       `Persona: ${persona.name}. Context: ${persona.description}. Evaluation lens: ${persona.evaluationLens}.`,
       `Rubric:\n${context.rubric}`,
@@ -81,14 +82,17 @@ export const groqProvider: LlmProvider = {
         const detail = payload?.error?.message ?? `HTTP ${response.status}`;
         const providerCode = payload?.error?.code ?? payload?.error?.type ?? null;
         const retryable = response.status === 408 || response.status === 409 || response.status === 429 || response.status >= 500;
+        const retryAfterHeader = response.headers.get('retry-after');
+        const retryAfterMs = retryAfterHeader ? parseRetryAfter(retryAfterHeader) : null;
         console.error('[groq] request failed', {
           status: response.status,
           model,
           providerCode,
           detail,
           retryable,
+          retryAfterMs,
         });
-        throw new GroqRequestError(`Groq request failed (${response.status}): ${detail}`, response.status, providerCode, retryable);
+        throw new GroqRequestError(`Groq request failed (${response.status}): ${detail}`, response.status, providerCode, retryable, retryAfterMs);
       }
 
       const content = payload?.choices?.[0]?.message?.content;
@@ -105,3 +109,10 @@ export const groqProvider: LlmProvider = {
     }
   },
 };
+
+function parseRetryAfter(value: string): number | null {
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, Math.round(seconds * 1000));
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : null;
+}

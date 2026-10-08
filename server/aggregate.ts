@@ -22,10 +22,10 @@ function topTerms(values: string[], limit = 5): string[] {
 }
 
 export function aggregateResults(runId: string, personaResults: PersonaResult[]): EvaluationResponse {
-  const valid = personaResults.filter((result) => result.status === 'valid');
-  const status = valid.length === 10 ? 'completed' : valid.length >= PARTIAL_MINIMUM ? 'completed_with_warnings' : 'failed';
+  const completedImageEvaluations = personaResults.reduce((sum, result) => sum + result.evaluations.length, 0);
+  const status = completedImageEvaluations === 30 ? 'completed' : completedImageEvaluations >= PARTIAL_MINIMUM * 3 ? 'completed_with_warnings' : 'failed';
   const images: AggregateImageResult[] = MODEL_SLOTS.map((slot) => {
-    const evaluations = valid.flatMap((persona) => persona.evaluations.filter((evaluation) => evaluation.image_id === slot.imageId));
+    const evaluations = personaResults.flatMap((persona) => persona.evaluations.filter((evaluation) => evaluation.image_id === slot.imageId));
     if (!evaluations.length) {
       return { image_id: slot.imageId, slot: slot.slot, model_name: slot.modelName, overall_score: null, star_rating: null, rank: null, criterion_scores: {}, strengths: [], weaknesses: [], concerns: [], india_specific_insights: [], valid_persona_count: 0 };
     }
@@ -60,12 +60,13 @@ export function aggregateResults(runId: string, personaResults: PersonaResult[])
   });
   ranked.forEach((image, index) => { image.rank = index + 1; });
   const winner = status === 'failed' ? null : ranked[0]?.image_id ?? null;
-  const warnings = personaResults.filter((result) => result.status === 'failed').map((result) => `${result.persona_name} failed: ${result.error_code ?? 'unknown error'}`);
+  const warnings = personaResults.flatMap((result) => result.failed_evaluations.map((failure) => `${failure.persona_name} / ${failure.model_name} failed: ${failure.error_code}`));
   const commonStrengths = topTerms(images.flatMap((image) => image.strengths));
   const commonConcerns = topTerms(images.flatMap((image) => image.concerns));
   const insights = topTerms(images.flatMap((image) => image.india_specific_insights));
   const agreement = images.flatMap((image) => image.criterion_scores.commercialBrandReadiness !== undefined ? [`${image.model_name}: valid-persona count ${image.valid_persona_count}`] : []);
-  const disagreement = valid.length ? [`Disagreement should be inspected in persona-level criterion scores; ${valid.length} valid personas contributed.`] : [];
+  const contributingPersonas = new Set(personaResults.filter((result) => result.evaluations.length > 0).map((result) => result.persona_id)).size;
+  const disagreement = contributingPersonas ? [`Disagreement should be inspected in persona-level criterion scores; ${contributingPersonas} personas contributed valid image evaluations.`] : [];
   const why = winner ? `${images.find((image) => image.image_id === winner)?.model_name} leads on the deterministic aggregate of valid persona scores.` : 'No reliable winner is available because the minimum valid-persona threshold was not met.';
 
   return {
@@ -74,9 +75,9 @@ export function aggregateResults(runId: string, personaResults: PersonaResult[])
     aggregation_version: AGGREGATION_VERSION,
     run_id: runId,
     status,
-    valid_persona_count: valid.length,
+    valid_persona_count: contributingPersonas,
     expected_persona_count: 10,
-    completed_image_evaluations: valid.length * 3,
+    completed_image_evaluations: completedImageEvaluations,
     images,
     persona_results: personaResults,
     overall_winner: winner,

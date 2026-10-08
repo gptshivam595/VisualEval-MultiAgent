@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CRITERIA, MODEL_SLOTS } from './types.js';
+import { CRITERIA } from './types.js';
 import type { PersonaImageEvaluation } from './types.js';
 import { calculateWeightedScore } from './rubric.js';
 
@@ -34,26 +34,17 @@ function parseJson(content: string): unknown {
   }
 }
 
-export function validatePersonaResponse(content: string, personaId: string): PersonaImageEvaluation[] {
+export function validatePersonaImageResponse(content: string, personaId: string, imageId: 'image1' | 'image2' | 'image3', modelName: string): PersonaImageEvaluation {
   const parsed = parseJson(content);
-  const candidate = (parsed as { evaluations?: unknown }).evaluations;
-  if (!Array.isArray(candidate) || candidate.length !== 3) throw new Error('Persona response must contain exactly three evaluations');
-
-  const results = candidate.map((item) => providerSchema.parse(item)) as PersonaImageEvaluation[];
-  const expectedIds = new Set(MODEL_SLOTS.map((slot) => slot.imageId));
-  if (new Set(results.map((result) => result.image_id)).size !== 3 || results.some((result) => !expectedIds.has(result.image_id))) {
-    throw new Error('Persona response must contain each image exactly once');
+  const candidate = (parsed as { evaluation?: unknown }).evaluation ?? parsed;
+  const result = providerSchema.parse(candidate) as PersonaImageEvaluation;
+  if (result.image_id !== imageId || result.persona_id !== personaId || result.model_name !== modelName) {
+    throw new Error('Persona response identity does not match server context');
   }
-  for (const result of results) {
-    const slot = MODEL_SLOTS.find((item) => item.imageId === result.image_id);
-    if (!slot || result.persona_id !== personaId || result.model_name !== slot.modelName) {
-      throw new Error('Persona response identity does not match server context');
-    }
-    const computed = calculateWeightedScore(result.criterion_scores);
-    if (Math.abs(computed - result.weighted_score) > 0.15) {
-      throw new Error('Persona weighted score does not match criterion scores');
-    }
-    result.weighted_score = computed;
+  const computed = calculateWeightedScore(result.criterion_scores);
+  if (Math.abs(computed - result.weighted_score) > 0.15) {
+    throw new Error('Persona weighted score does not match criterion scores');
   }
-  return results;
+  result.weighted_score = computed;
+  return result;
 }

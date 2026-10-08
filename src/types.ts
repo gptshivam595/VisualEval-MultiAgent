@@ -7,7 +7,7 @@ export interface EvaluationResponse {
   expected_persona_count: number;
   completed_image_evaluations: number;
   images: Array<{ image_id: ImageId; slot: number; model_name: string; overall_score: number | null; star_rating: number | null; rank: number | null; criterion_scores: Record<string, number>; strengths: string[]; weaknesses: string[]; concerns: string[]; india_specific_insights: string[]; valid_persona_count: number; }>;
-  persona_results: Array<{ persona_id: string; persona_name: string; status: 'valid' | 'failed'; evaluations: Array<{ image_id: ImageId; model_name: string; criterion_scores: Record<string, number>; criterion_reasoning: Record<string, string>; weighted_score: number; strengths: string[]; concerns: string[]; india_specific_observations: string[]; confidence: number; }>; error_code: string | null; }>;
+  persona_results: Array<{ persona_id: string; persona_name: string; status: 'valid' | 'partial' | 'failed'; evaluations: Array<{ image_id: ImageId; model_name: string; criterion_scores: Record<string, number>; criterion_reasoning: Record<string, string>; weighted_score: number; strengths: string[]; concerns: string[]; india_specific_observations: string[]; confidence: number; }>; failed_evaluations: Array<{ image_id: ImageId; model_name: string; error_code: string; attempts: number; }>; error_code: string | null; }>;
   overall_winner: ImageId | null;
   why: string;
   common_strengths: string[];

@@ -47,11 +47,22 @@ export interface PersonaImageEvaluation {
   confidence: number;
 }
 
+export interface FailedImageEvaluation {
+  persona_id: string;
+  persona_name: string;
+  image_id: ImageId;
+  model_name: string;
+  status: 'failed';
+  error_code: string;
+  attempts: number;
+}
+
 export interface PersonaResult {
   persona_id: string;
   persona_name: string;
-  status: 'valid' | 'failed';
+  status: 'valid' | 'partial' | 'failed';
   evaluations: PersonaImageEvaluation[];
+  failed_evaluations: FailedImageEvaluation[];
   error_code: string | null;
 }
 
