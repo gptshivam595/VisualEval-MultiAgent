@@ -160,29 +160,28 @@ The frontend should not store or expose the provider key, raw provider credentia
 
 ### Image handling
 
-For this prototype, images should be sent as one `multipart/form-data` request with exactly three file fields: `image1`, `image2`, and `image3`. The backend must reject missing, duplicate, unexpected, or extra image fields. Multipart avoids requiring the browser to inflate image bytes into JSON/base64 and makes the request contract explicit. The function must enforce per-file and total request-size limits and supported MIME types. Object URLs used for browser previews must be revoked when no longer needed.
+Images are selected in the browser and converted to data URLs for individual job requests. The browser sends one image, one persona ID, and one fixed model identity to the agent endpoint for each job. The backend validates the persona and immutable image/model mapping before calling Groq. This keeps each request short enough to complete within a serverless invocation; production size limits must remain aligned with Netlify request limits.
 
 ## 6. Backend/serverless architecture
 
-Netlify Functions provide the server-side API surface. A single evaluation endpoint is sufficient for the first implementation:
+Netlify Functions provide the server-side API surface. The prototype uses one short-lived evaluation endpoint per job:
 
 ```text
-POST /.netlify/functions/run-evaluation
+POST /.netlify/functions/evaluate-agent
 ```
 
 The function should:
 
-1. Parse the incoming request.
-2. Confirm that exactly the three expected image fields are present.
-3. Assign the immutable slot mapping on the server:
-   - `image1` → `GPT-Image-2.5`
-   - `image2` → `Nano Banana 2.1`
-   - `image3` → `Nano Banana Pro`
-4. Ignore or reject client-supplied model labels and evaluation configuration.
-5. Validate image MIME types, sizes, and basic payload shape.
-6. Load the fixed persona definitions and rubric.
-7. Send the three images and evaluation instructions through the configured server-side provider adapter.
-8. Collect one structured output for each of the ten persona IDs.
+1. Parse one JSON job request.
+2. Confirm the persona ID and image ID are known.
+3. Assign and verify the immutable slot mapping on the server.
+4. Validate the image data URL and request size.
+5. Load the fixed persona definition and rubric.
+6. Send exactly one image through the server-side provider adapter.
+7. Validate one structured evaluation response.
+8. Return JSON for that one job, or a JSON error without exposing secrets.
+
+The browser creates the 30 jobs, sends at most two concurrently, tracks progress, and performs deterministic aggregation after all jobs settle. The legacy `run-evaluation` function is no longer in the frontend execution path and must not be used for a full run.
 9. Validate and normalize each output.
 10. Calculate aggregates, ratings, ranking, agreement, disagreement, and common concerns.
 11. Return one typed response to the frontend.
@@ -247,7 +246,7 @@ Each persona must:
 - Produce a separate result.
 - Avoid seeing the judgments of other personas before submitting its own judgment.
 
-The implementation should use bounded concurrency to reduce latency while respecting provider rate limits and serverless execution limits. A concurrency limit is an operational control, not a reduction in persona count: all exactly ten personas must be scheduled. Each persona call must receive all three images in one independent evaluation context. The number of personas remains exactly ten.
+The implementation uses 30 independent persona-image jobs: one persona and one image per job. The browser orchestrator runs a bounded queue of two jobs concurrently, so all exactly ten personas still evaluate all three images without keeping one serverless request open for the full run. Each job receives only its assigned image and cannot compare images during its evaluation.
 
 ### Shared evaluation rubric
 
@@ -381,17 +380,19 @@ The API should return structured JSON rather than requiring the frontend to pars
 ### Evaluation request
 
 ```text
-POST /.netlify/functions/run-evaluation
-Content-Type: multipart/form-data
+POST /api/evaluate-agent
+Content-Type: application/json
 ```
 
-The request contains exactly these file fields:
+The request contains one fixed persona-image job:
 
 ```json
 {
-  "image1": "<file for GPT-Image-2.5>",
-  "image2": "<file for Nano Banana 2.1>",
-  "image3": "<file for Nano Banana Pro>"
+  "personaId": "north-delhi-brand-strategist",
+  "imageId": "image1",
+  "modelName": "GPT-Image-2.5",
+  "mimeType": "image/jpeg",
+  "dataUrl": "data:image/jpeg;base64,..."
 }
 ```
 
@@ -659,6 +660,8 @@ The following is the intended structure once implementation begins. It is docume
 │       └── ...
 ├── netlify/
 │   └── functions/
+│       ├── evaluate-agent.ts
+│       ├── health.ts
 │       └── run-evaluation.ts
 └── server/
     ├── personas.ts

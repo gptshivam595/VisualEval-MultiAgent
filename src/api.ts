@@ -1,4 +1,4 @@
-export const EVALUATION_API_PATH = '/api/run-evaluation';
+export const AGENT_API_PATH = '/api/evaluate-agent';
 
 function shortResponseBody(body: string): string {
   return body.replace(/\s+/g, ' ').trim().slice(0, 240);

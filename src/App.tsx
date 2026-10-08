@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
-import type { EvaluationResponse, ImageSlot } from './types';
-import { EVALUATION_API_PATH, readApiResponse } from './api';
+import type { EvaluationResponse, ImageSlot, PersonaResult, PersonaEvaluation } from './types';
+import { AGENT_API_PATH, readApiResponse } from './api';
+import { aggregateClientResults } from './client-aggregate';
 
 const slots: Omit<ImageSlot, 'file' | 'previewUrl' | 'error'>[] = [
   { imageId: 'image1', slot: 1, modelName: 'GPT-Image-2.5' },
@@ -21,12 +22,23 @@ const personaMeta = [
   ['northeast-guwahati-consultant', 'Tashi Deka', 'Guwahati', 'Northeast India'],
 ] as const;
 
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Could not read image'));
+    reader.onerror = () => reject(new Error('Could not read image'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function App() {
   const [page, setPage] = useState<'setup' | 'progress' | 'personas' | 'results'>('setup');
   const [images, setImages] = useState<ImageSlot[]>(slots.map((slot) => ({ ...slot, file: null, previewUrl: null, error: null })));
   const [result, setResult] = useState<EvaluationResponse | null>(null);
   const [selectedPersona, setSelectedPersona] = useState(0);
   const [error, setError] = useState('');
+  const [running, setRunning] = useState(false);
+  const [jobStatuses, setJobStatuses] = useState<Record<string, 'Waiting' | 'Evaluating' | 'Completed' | 'Failed'>>({});
   const ready = images.every((image) => image.file && !image.error);
   const selectedResult = result?.persona_results[selectedPersona];
 
@@ -41,20 +53,56 @@ function App() {
   };
 
   const runEvaluation = async () => {
-    if (!ready) return;
+    if (!ready || running) return;
     setError('');
     setPage('progress');
-    const form = new FormData();
-    images.forEach((image) => form.append(image.imageId, image.file!));
+    setRunning(true);
+    setResult(null);
+    const dataUrls = await Promise.all(images.map(async (image) => ({ ...image, dataUrl: await fileToDataUrl(image.file!) })));
+    const jobs = personaMeta.flatMap(([personaId]) => images.map((image) => ({ personaId, image, dataUrl: dataUrls.find((item) => item.imageId === image.imageId)!.dataUrl })));
+    const evaluations: PersonaEvaluation[] = [];
+    const failures = new Map<string, { image_id: 'image1' | 'image2' | 'image3'; model_name: string; error_code: string; attempts: number }>();
+    const statuses: Record<string, 'Waiting' | 'Evaluating' | 'Completed' | 'Failed'> = {};
+    jobs.forEach((job) => { statuses[`${job.personaId}:${job.image.imageId}`] = 'Waiting'; });
+    setJobStatuses({ ...statuses });
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < jobs.length) {
+        const job = jobs[cursor];
+        cursor += 1;
+        const key = `${job.personaId}:${job.image.imageId}`;
+        statuses[key] = 'Evaluating';
+        setJobStatuses({ ...statuses });
+        try {
+          const response = await fetch(AGENT_API_PATH, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personaId: job.personaId, imageId: job.image.imageId, modelName: job.image.modelName, mimeType: job.image.file!.type, dataUrl: job.dataUrl }),
+          });
+          const payload = await readApiResponse<{ success: true; evaluation: PersonaEvaluation }>(response, AGENT_API_PATH);
+          evaluations.push(payload.evaluation);
+          statuses[key] = 'Completed';
+        } catch (caught) {
+          failures.set(key, { image_id: job.image.imageId, model_name: job.image.modelName, error_code: caught instanceof Error ? caught.message.slice(0, 180) : 'evaluation_failed', attempts: 1 });
+          statuses[key] = 'Failed';
+        }
+        setJobStatuses({ ...statuses });
+      }
+    };
     try {
-      const response = await fetch(EVALUATION_API_PATH, { method: 'POST', body: form });
-      const data = await readApiResponse<EvaluationResponse | { error?: string }>(response, EVALUATION_API_PATH);
-      if ('error' in data && data.error) throw new Error(`${EVALUATION_API_PATH}: ${data.error}`);
-      setResult(data as EvaluationResponse);
+      await Promise.all([worker(), worker()]);
+      const personaResults: PersonaResult[] = personaMeta.map(([personaId, personaName]) => {
+        const personaEvaluations = evaluations.filter((item) => item.persona_id === personaId);
+        const failedEvaluations = jobs.filter((job) => job.personaId === personaId).map((job) => failures.get(`${personaId}:${job.image.imageId}`)).filter((failure): failure is NonNullable<typeof failure> => Boolean(failure));
+        return { persona_id: personaId, persona_name: personaName, status: personaEvaluations.length === 3 ? 'valid' : personaEvaluations.length ? 'partial' : 'failed', evaluations: personaEvaluations, failed_evaluations: failedEvaluations, error_code: failedEvaluations[0]?.error_code ?? null };
+      });
+      setResult(aggregateClientResults(personaResults));
       setPage('personas');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Evaluation failed');
       setPage('setup');
+    } finally {
+      setRunning(false);
     }
   };
 
@@ -64,7 +112,7 @@ function App() {
     <nav className="steps" aria-label="Evaluation stages">{nav.map((item, index) => <button key={item} className={page === item ? 'step active' : 'step'} onClick={() => result && setPage(item)} disabled={!result && index > 0}>{index + 1}. {item.replace(/^\w/, (letter) => letter.toUpperCase())}</button>)}</nav>
     {error && <div className="alert error">{error}</div>}
     {page === 'setup' && <section><div className="section-heading"><span className="eyebrow">STEP 1</span><h2>Evaluation setup</h2><p>Upload one image for each fixed model slot. The mapping cannot be changed.</p></div><div className="upload-grid">{images.map((image, index) => <UploadCard key={image.imageId} image={image} onChange={(file) => updateImage(index, file)} />)}</div><button className="primary" disabled={!ready} onClick={runEvaluation}>Run Evaluation</button><p className="muted">10 personas × 3 images = 30 image evaluations.</p></section>}
-    {page === 'progress' && <ProgressPage result={result} />}
+    {page === 'progress' && <ProgressPage result={result} jobStatuses={jobStatuses} />}
     {page === 'personas' && result && <PersonaPage selectedPersona={selectedPersona} setSelectedPersona={setSelectedPersona} selectedResult={selectedResult} images={images} />}
     {page === 'results' && result && <ResultsPage result={result} images={images} />}
   </main>;
@@ -74,9 +122,9 @@ function UploadCard({ image, onChange }: { image: ImageSlot; onChange: (file: Fi
   return <article className="upload-card"><div className="card-title"><span className="eyebrow">IMAGE {image.slot} OF 3</span><h3>{image.modelName}</h3></div>{image.previewUrl ? <img className="preview" src={image.previewUrl} alt={`${image.modelName} upload preview`} /> : <label className="dropzone">Choose image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onChange(event.target.files?.[0] ?? null)} /></label>}{image.error && <p className="field-error">{image.error}</p>}{image.previewUrl && <div className="card-actions"><label className="text-button">Replace<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => onChange(event.target.files?.[0] ?? null)} /></label><button className="text-button" onClick={() => onChange(null)}>Remove</button></div>}</article>;
 }
 
-function ProgressPage({ result }: { result: EvaluationResponse | null }) {
-  const completed = result?.completed_image_evaluations ?? 0;
-  return <section><div className="section-heading"><span className="eyebrow">STEP 2</span><h2>Evaluating 10 Indian Personas</h2><p>Each persona independently evaluates all 3 images using the same 10 criteria.</p></div><div className="progress-number">{completed} / 30 <span>image evaluations completed</span></div><div className="persona-list">{personaMeta.map(([id, name, city, region]) => { const status = result?.persona_results.find((item) => item.persona_id === id)?.status; return <div className="persona-row" key={id}><span className="avatar">{name.split(' ').map((part) => part[0]).join('')}</span><div><strong>{name}</strong><small>{city} · {region}</small></div><span className={`status ${status ?? 'waiting'}`}>{status === 'valid' ? 'Completed' : status === 'partial' ? 'Partial' : status === 'failed' ? 'Failed' : result ? 'Evaluating' : 'Waiting'}</span></div>; })}</div>{!result && <p className="muted">The server is processing a controlled queue of 30 evaluations. Progress is reported when the server response completes.</p>}</section>;
+function ProgressPage({ result, jobStatuses }: { result: EvaluationResponse | null; jobStatuses: Record<string, 'Waiting' | 'Evaluating' | 'Completed' | 'Failed'> }) {
+  const completed = result?.completed_image_evaluations ?? Object.values(jobStatuses).filter((status) => status === 'Completed').length;
+  return <section><div className="section-heading"><span className="eyebrow">STEP 2</span><h2>Evaluating 10 Indian Personas</h2><p>Each persona independently evaluates all 3 images using the same 10 criteria.</p></div><div className="progress-number">{completed} / 30 <span>image evaluations completed</span></div><div className="persona-list">{personaMeta.map(([id, name, city, region]) => { const personaStatuses = Object.entries(jobStatuses).filter(([key]) => key.startsWith(`${id}:`)).map(([, status]) => status); const status = result?.persona_results.find((item) => item.persona_id === id)?.status; const display = status === 'valid' ? 'Completed' : status === 'partial' ? 'Partial' : status === 'failed' ? 'Failed' : personaStatuses.includes('Failed') ? 'Failed' : personaStatuses.includes('Evaluating') ? 'Evaluating' : personaStatuses.includes('Completed') ? 'Evaluating' : 'Waiting'; return <div className="persona-row" key={id}><span className="avatar">{name.split(' ').map((part) => part[0]).join('')}</span><div><strong>{name}</strong><small>{city} · {region}</small></div><span className={`status ${display.toLowerCase()}`}>{display}</span></div>; })}</div><p className="muted">The browser queues 30 independent jobs and sends 2 at a time. Failed jobs are retained without fabricated scores.</p></section>;
 }
 
 function PersonaPage({ selectedPersona, setSelectedPersona, selectedResult, images }: { selectedPersona: number; setSelectedPersona: (value: number) => void; selectedResult: EvaluationResponse['persona_results'][number] | undefined; images: ImageSlot[] }) {
