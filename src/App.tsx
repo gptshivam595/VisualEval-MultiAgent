@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { EvaluationResponse, ImageSlot } from './types';
+import { EVALUATION_API_PATH, readApiResponse } from './api';
 
 const slots: Omit<ImageSlot, 'file' | 'previewUrl' | 'error'>[] = [
   { imageId: 'image1', slot: 1, modelName: 'GPT-Image-2.5' },
@@ -46,9 +47,9 @@ function App() {
     const form = new FormData();
     images.forEach((image) => form.append(image.imageId, image.file!));
     try {
-      const response = await fetch('/.netlify/functions/run-evaluation', { method: 'POST', body: form });
-      const data = await response.json() as EvaluationResponse | { error?: string };
-      if (!response.ok) throw new Error('error' in data && data.error ? data.error : 'Evaluation failed');
+      const response = await fetch(EVALUATION_API_PATH, { method: 'POST', body: form });
+      const data = await readApiResponse<EvaluationResponse | { error?: string }>(response, EVALUATION_API_PATH);
+      if ('error' in data && data.error) throw new Error(`${EVALUATION_API_PATH}: ${data.error}`);
       setResult(data as EvaluationResponse);
       setPage('personas');
     } catch (caught) {
