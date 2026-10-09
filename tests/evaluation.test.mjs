@@ -51,24 +51,24 @@ function results() {
   }));
 }
 
-test('two personas produce six evaluations with matching aggregate denominators', () => {
+test('one persona produces three evaluations with matching aggregate denominators', () => {
   const aggregate = aggregateResults('test', results());
-  assert.equal(PERSONAS.length, 2);
-  assert.equal(aggregate.expected_persona_count, 2);
-  assert.equal(aggregate.completed_image_evaluations, 6);
+  assert.equal(PERSONAS.length, 1);
+  assert.equal(aggregate.expected_persona_count, 1);
+  assert.equal(aggregate.completed_image_evaluations, 3);
   assert.equal(aggregate.status, 'completed');
   assert.ok(aggregate.overall_winner);
-  assert.ok(aggregate.images.every((image) => image.valid_persona_count === 2));
+  assert.ok(aggregate.images.every((image) => image.valid_persona_count === 1));
 });
 
 test('partial results retain scores but cannot declare a winner', () => {
   const input = results();
-  input[1].evaluations.pop();
+  input[0].evaluations.pop();
   const aggregate = aggregateResults('test', input);
-  assert.equal(aggregate.completed_image_evaluations, 5);
+  assert.equal(aggregate.completed_image_evaluations, 2);
   assert.equal(aggregate.status, 'completed_with_warnings');
   assert.equal(aggregate.overall_winner, null);
-  assert.equal(aggregate.images[2].valid_persona_count, 1);
+  assert.equal(aggregate.images[2].valid_persona_count, 0);
 });
 
 test('all ten criterion scores and reasons are required', () => {

@@ -68,7 +68,7 @@ export function aggregateResults(runId: string, personaResults: PersonaResult[])
   const agreement = images.flatMap((image) => image.criterion_scores.commercialBrandReadiness !== undefined ? [`${image.model_name}: valid-persona count ${image.valid_persona_count}`] : []);
   const contributingPersonas = new Set(personaResults.filter((result) => result.evaluations.length > 0).map((result) => result.persona_id)).size;
   const disagreement = contributingPersonas ? [`Disagreement should be inspected in persona-level criterion scores; ${contributingPersonas} personas contributed valid image evaluations.`] : [];
-  const why = winner ? `${images.find((image) => image.image_id === winner)?.model_name} leads on the deterministic aggregate of valid persona scores.` : 'No winner is declared until both personas have evaluated all three images.';
+  const why = winner ? `${images.find((image) => image.image_id === winner)?.model_name} leads on the deterministic aggregate of valid persona scores.` : 'No winner is declared until all configured personas have evaluated all three images.';
 
   return {
     schema_version: '1.0',
