@@ -1,5 +1,7 @@
 # Indian Fashion AI Evaluation UI/UX Specification
 
+> Current implementation (October 2026): two active personas, Aditi Mehra and Devika Shah, evaluate three images (six jobs). Requests are sequential with a 45-second interval; browser retries honor provider cooldowns. Successful jobs are retained for retry within the session, and a winner requires all six results. The ten-persona descriptions below document the original expanded design.
+
 ## 1. Product and design intent
 
 This prototype should feel simple, clean, professional, premium, and evaluation-focused. It is not a complex SaaS dashboard, analytics suite, or consumer shopping site.

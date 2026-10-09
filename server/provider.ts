@@ -48,17 +48,18 @@ export const groqProvider: LlmProvider = {
       'Evaluate each image independently. Do not rank or compare images.',
       'Return only valid JSON with no markdown, no code fences, and no commentary outside JSON.',
       'Use exactly the supplied criterion IDs and score each from 0 to 10.',
-      'Provide concise evidence for every criterion, strengths, concerns, India-specific observations, and confidence from 0 to 1.',
+      'Keep each criterion reason under 25 words. Provide up to three strengths, concerns, and India-specific observations, and confidence from 0 to 1.',
       'Return a JSON object with one evaluation object. Every object must contain exactly these fields: persona_id, persona_name, image_id, model_name, criterion_scores, criterion_reasoning, weighted_score, strengths, concerns, india_specific_observations, confidence.',
       'criterion_scores and criterion_reasoning must contain every supplied criterion ID. weighted_score must be the weighted 0-10 calculation from criterion_scores.',
-      `Persona: ${persona.name}. Context: ${persona.description}. Evaluation lens: ${persona.evaluationLens}.`,
+      `Exact persona_id: ${persona.personaId}. Copy this ID verbatim in the response. Persona: ${persona.name}. Context: ${persona.description}. Evaluation lens: ${persona.evaluationLens}.`,
       `Rubric:\n${context.rubric}`,
     ].join('\n\n');
 
     const requestBody = {
       model,
       temperature: 0.2,
-      max_completion_tokens: 5000,
+      ...(model === 'qwen/qwen3.8-27b' ? { reasoning_effort: 'none' } : {}),
+      max_completion_tokens: 2000,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: system },

@@ -1,8 +1,9 @@
+import { PERSONAS } from './personas.js';
 import { AGGREGATION_VERSION, calculateWeightedScore } from './rubric.js';
 import { CRITERIA, MODEL_SLOTS } from './types.js';
 import type { AggregateImageResult, EvaluationResponse, PersonaResult } from './types.js';
 
-const PARTIAL_MINIMUM = 7;
+const EXPECTED_EVALUATIONS = PERSONAS.length * MODEL_SLOTS.length;
 
 function round(value: number, digits = 2): number {
   return Number(value.toFixed(digits));
@@ -23,7 +24,7 @@ function topTerms(values: string[], limit = 5): string[] {
 
 export function aggregateResults(runId: string, personaResults: PersonaResult[]): EvaluationResponse {
   const completedImageEvaluations = personaResults.reduce((sum, result) => sum + result.evaluations.length, 0);
-  const status = completedImageEvaluations === 30 ? 'completed' : completedImageEvaluations >= PARTIAL_MINIMUM * 3 ? 'completed_with_warnings' : 'failed';
+  const status = completedImageEvaluations === EXPECTED_EVALUATIONS ? 'completed' : completedImageEvaluations > 0 ? 'completed_with_warnings' : 'failed';
   const images: AggregateImageResult[] = MODEL_SLOTS.map((slot) => {
     const evaluations = personaResults.flatMap((persona) => persona.evaluations.filter((evaluation) => evaluation.image_id === slot.imageId));
     if (!evaluations.length) {
@@ -59,15 +60,15 @@ export function aggregateResults(runId: string, personaResults: PersonaResult[])
     return premium !== 0 ? premium : a.slot - b.slot;
   });
   ranked.forEach((image, index) => { image.rank = index + 1; });
-  const winner = status === 'failed' ? null : ranked[0]?.image_id ?? null;
-  const warnings = personaResults.flatMap((result) => result.failed_evaluations.map((failure) => `${failure.persona_name} / ${failure.model_name} failed: ${failure.error_code}`));
+  const winner = status === 'completed' ? ranked[0]?.image_id ?? null : null;
+  const warnings = personaResults.flatMap((result) => result.failed_evaluations.map((failure) => `${result.persona_name} / ${failure.model_name} failed: ${failure.error_code}`));
   const commonStrengths = topTerms(images.flatMap((image) => image.strengths));
   const commonConcerns = topTerms(images.flatMap((image) => image.concerns));
   const insights = topTerms(images.flatMap((image) => image.india_specific_insights));
   const agreement = images.flatMap((image) => image.criterion_scores.commercialBrandReadiness !== undefined ? [`${image.model_name}: valid-persona count ${image.valid_persona_count}`] : []);
   const contributingPersonas = new Set(personaResults.filter((result) => result.evaluations.length > 0).map((result) => result.persona_id)).size;
   const disagreement = contributingPersonas ? [`Disagreement should be inspected in persona-level criterion scores; ${contributingPersonas} personas contributed valid image evaluations.`] : [];
-  const why = winner ? `${images.find((image) => image.image_id === winner)?.model_name} leads on the deterministic aggregate of valid persona scores.` : 'No reliable winner is available because the minimum valid-persona threshold was not met.';
+  const why = winner ? `${images.find((image) => image.image_id === winner)?.model_name} leads on the deterministic aggregate of valid persona scores.` : 'No winner is declared until both personas have evaluated all three images.';
 
   return {
     schema_version: '1.0',
@@ -76,7 +77,7 @@ export function aggregateResults(runId: string, personaResults: PersonaResult[])
     run_id: runId,
     status,
     valid_persona_count: contributingPersonas,
-    expected_persona_count: 10,
+    expected_persona_count: PERSONAS.length,
     completed_image_evaluations: completedImageEvaluations,
     images,
     persona_results: personaResults,

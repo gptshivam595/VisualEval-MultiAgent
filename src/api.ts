@@ -1,3 +1,10 @@
+export class ApiError extends Error {
+  constructor(public readonly status: number, public readonly code: string, public readonly retryAfterMs: number | null, message: string) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 export const AGENT_API_PATH = '/api/evaluate-agent';
 
 function shortResponseBody(body: string): string {
@@ -11,7 +18,9 @@ export async function readApiResponse<T>(response: Response, path: string): Prom
 
   if (!response.ok) {
     const detail = isJson ? parseJsonError(body) : shortResponseBody(body);
-    throw new Error(`${path} returned HTTP ${response.status} (${contentType}): ${detail || 'No response body'}`);
+    const seconds = Number(response.headers.get('retry-after'));
+    const retryAfterMs = response.headers.has('retry-after') && Number.isFinite(seconds) ? Math.max(0, seconds * 1000) : null;
+    throw new ApiError(response.status, detail, retryAfterMs, `${path} returned HTTP ${response.status} (${contentType}): ${detail || 'No response body'}`);
   }
 
   if (!isJson) {

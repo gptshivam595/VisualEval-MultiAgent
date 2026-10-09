@@ -157,7 +157,7 @@ export const handler: Handler = async (event) => {
       return { imageId: slot.imageId, modelName: slot.modelName, mimeType: part.type, dataUrl: `data:${part.type};base64,${part.data.toString('base64')}` };
     });
     const jobs = PERSONAS.flatMap((persona) => MODEL_SLOTS.map((image) => ({ persona, image, input: images.find((candidate) => candidate.imageId === image.imageId)! })));
-    if (jobs.length !== 30) throw new Error('evaluation_job_count_mismatch');
+    if (jobs.length !== PERSONAS.length * MODEL_SLOTS.length) throw new Error('evaluation_job_count_mismatch');
     const evaluations = new Map<string, PersonaImageEvaluation>();
     const failures = new Map<string, FailedImageEvaluation>();
     let completedCount = 0;

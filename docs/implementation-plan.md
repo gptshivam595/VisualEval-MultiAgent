@@ -1,5 +1,7 @@
 # Implementation Plan
 
+> Current implementation (October 2026): two active personas, Aditi Mehra and Devika Shah, evaluate three images (six jobs). Requests are sequential with a 45-second interval; browser retries honor provider cooldowns. Successful jobs are retained for retry within the session, and a winner requires all six results. The ten-persona descriptions below document the original expanded design.
+
 ## Plan scope
 
 This plan turns the existing architecture, persona specification, evaluation framework, orchestration design, and UI specification into a practical prototype implementation.

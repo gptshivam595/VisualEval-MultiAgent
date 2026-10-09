@@ -6,7 +6,7 @@ import { MODEL_SLOTS } from '../../server/types.js';
 import type { PersonaImageEvaluation } from '../../server/types.js';
 import { validatePersonaImageResponse } from '../../server/validation.js';
 
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 1;
 const MAX_IMAGE_DATA_URL_LENGTH = 12 * 1024 * 1024;
 
 class EvaluationValidationError extends Error {
@@ -72,12 +72,15 @@ export const handler: Handler = async (event) => {
     if (!persona || !image || body.modelName !== image.modelName || typeof body.dataUrl !== 'string' || typeof body.mimeType !== 'string') {
       return response(400, { success: false, error: 'invalid_evaluation_job' });
     }
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(body.mimeType)) return response(400, { success: false, error: 'invalid_image_data' });
     if (!body.dataUrl.startsWith(`data:${body.mimeType};base64,`) || body.dataUrl.length > MAX_IMAGE_DATA_URL_LENGTH) {
       return response(400, { success: false, error: 'invalid_image_data' });
     }
 
     let lastError: unknown;
+    let attempts = 0;
     for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt += 1) {
+      attempts = attempt;
       try {
         const raw = await groqProvider.evaluatePersonaImage({
           image: { imageId: image.imageId, modelName: image.modelName, mimeType: body.mimeType, dataUrl: body.dataUrl },
@@ -100,6 +103,10 @@ export const handler: Handler = async (event) => {
       } catch (error) {
         lastError = error;
         const retryable = error instanceof GroqRequestError ? error.retryable : error instanceof EvaluationValidationError;
+        if (error instanceof GroqRequestError && error.status === 429) {
+          const retryAfterMs = error.retryAfterMs ?? 60_000;
+          return { ...response(429, { success: false, error: 'provider_rate_limited', retryAfterMs }), headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Retry-After': String(Math.ceil(retryAfterMs / 1000)) } };
+        }
         if (!retryable || attempt > MAX_RETRIES) break;
         const retryAfter = error instanceof GroqRequestError ? error.retryAfterMs : null;
         const delay = Math.min(30_000, retryAfter ?? backoff(attempt));
@@ -119,7 +126,7 @@ export const handler: Handler = async (event) => {
       persona: persona.name,
       image: image.imageId,
       model: image.modelName,
-      attempts: MAX_RETRIES + 1,
+      attempts,
       status: lastError instanceof GroqRequestError ? lastError.status : null,
       errorCode: code,
     });

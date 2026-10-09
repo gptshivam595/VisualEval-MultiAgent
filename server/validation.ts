@@ -5,8 +5,8 @@ import { calculateWeightedScore } from './rubric.js';
 
 const criterionIds = CRITERIA.map((criterion) => criterion.id) as [string, ...string[]];
 const scoreSchema = z.number().int().min(0).max(10);
-const scoreRecord = z.record(z.enum(criterionIds), scoreSchema);
-const reasoningRecord = z.record(z.enum(criterionIds), z.string().min(1).max(1000));
+const scoreRecord = z.object(Object.fromEntries(criterionIds.map((id) => [id, scoreSchema]))).strict();
+const reasoningRecord = z.object(Object.fromEntries(criterionIds.map((id) => [id, z.string().trim().min(1).max(1000)]))).strict();
 
 const providerSchema = z.object({
   persona_id: z.string(),

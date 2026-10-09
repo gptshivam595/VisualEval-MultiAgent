@@ -1,5 +1,7 @@
 # AI Fashion Campaign Evaluation Prototype
 
+> Current implementation (October 2026): two active personas, Aditi Mehra and Devika Shah, evaluate three images (six jobs). Requests are sequential with a 45-second interval; browser retries honor provider cooldowns. Successful jobs are retained for retry within the session, and a winner requires all six results. The ten-persona descriptions below document the original expanded design.
+
 ## 1. Product objective
 
 This prototype is a research and pre-evaluation tool for comparing three AI-generated premium clothing or fashion campaign images for the Indian e-commerce market.

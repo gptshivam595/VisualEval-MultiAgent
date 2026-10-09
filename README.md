@@ -8,7 +8,7 @@ The system compares three fixed model slots:
 2. **Nano Banana 2.1**
 3. **Nano Banana Pro**
 
-For every run, ten simulated personas independently evaluate all three images. That produces **10 × 3 = 30 individual persona-image evaluations**, followed by deterministic aggregation and a side-by-side model comparison.
+For every run, two simulated personas independently evaluate all three images. That produces **2 × 3 = 6 individual persona-image evaluations**, followed by deterministic aggregation and a side-by-side model comparison.
 
 > **Methodology note:** These personas are simulated analytical perspectives, not real people or statistically representative samples. They are a pre-evaluation and criteria-discovery layer. They do not replace the real Indian participants required for final human evaluation.
 
@@ -27,6 +27,8 @@ Generic image-quality comparisons do not fully answer whether an image works for
 The product question is:
 
 > Which image-generation model produces imagery that is visually strong, culturally appropriate, commercially useful, and relevant across diverse Indian fashion/e-commerce contexts?
+
+The two active personas are **Aditi Mehra (brand strategist)** and **Devika Shah (textile sourcing professional)**. A run makes six initial provider requests rather than thirty (80% fewer). Failed jobs can be retried without repeating successful jobs while the browser session remains open. A winner is declared only after all six evaluations succeed.
 
 ## Evaluation criteria
 
@@ -64,18 +66,18 @@ The browser validates PNG, JPEG, and WebP uploads and limits each image to 8 MB.
 
 ### 2. Evaluation progress
 
-The browser creates 30 independent jobs. Each job contains one persona and one image/model. Two jobs are processed concurrently, avoiding a single long-running request for the whole run.
+The browser creates 6 independent jobs. Each job contains one persona and one image/model. One job is processed at a time, with 45 seconds between requests, avoiding a single long-running request for the whole run.
 
 Each job is shown as waiting, evaluating, completed, or failed. The server-side agent function handles bounded retries for transient Groq failures:
 
-- HTTP 429 respects `Retry-After` when available.
+- HTTP 429 passes `Retry-After` to the browser when available.
 - Temporary 5xx and transport errors use exponential backoff with jitter.
-- Retries are bounded to three retries.
+- Rate-limit errors are returned immediately with `Retry-After`. The browser retries up to twice, waiting the full cooldown when it is at most two minutes; longer cooldowns pause the run for manual retry. Other transient/validation errors have at most one server retry.
 - Permanent 400, 401, 403, and 404 responses are not retried indefinitely.
 
 ### 3. Persona results
 
-The UI allows switching between the ten simulated personas. For each persona and completed image evaluation, it displays:
+The UI allows switching between the two simulated personas. For each persona and completed image evaluation, it displays:
 
 - Criterion scores
 - Criterion reasoning
@@ -89,7 +91,7 @@ If one job fails, successful jobs remain available and the persona is represente
 
 ### 4. Final results
 
-After the 30 jobs settle, the browser performs deterministic aggregation and shows:
+After the 6 jobs settle, the browser performs deterministic aggregation and shows:
 
 - Three images side by side
 - Overall score and 5-star rating
@@ -108,8 +110,8 @@ No LLM call is used to calculate final weighted scores or rankings.
 ```mermaid
 flowchart TD
     A[User uploads 3 images] --> B[React browser orchestrator]
-    B --> C[Create 30 persona-image jobs]
-    C --> D[Two concurrent requests]
+    B --> C[Create 6 persona-image jobs]
+    C --> D[One request at a time]
     D --> E[POST /api/evaluate-agent]
     E --> F[Netlify Function]
     F --> G[Load one persona and fixed model slot]
@@ -147,7 +149,7 @@ Netlify rewrites this to:
 /.netlify/functions/evaluate-agent
 ```
 
-The function validates the persona ID, image ID, fixed model mapping, MIME type, and data URL before calling Groq. It returns one structured evaluation or a JSON error. It never executes all 30 evaluations in one invocation.
+The function validates the persona ID, image ID, fixed model mapping, MIME type, and data URL before calling Groq. It returns one structured evaluation or a JSON error. It never executes all 6 evaluations in one invocation.
 
 The repository also includes a health endpoint:
 
@@ -310,11 +312,12 @@ npm run netlify:dev
 
 This uses the Netlify configuration to proxy the frontend and Functions locally.
 
-### Build and lint
+### Build, lint, and test
 
 ```bash
 npm run build
 npm run lint
+npm test
 ```
 
 ## Netlify deployment
